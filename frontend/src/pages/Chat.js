@@ -81,12 +81,15 @@ const Chat = () => {
           
           // Listen for new messages
           socket.on('new_message', (data) => {
-            if (!mountedRef.current || !data.chat) return;
-            
-            // Update messages if this is the current chat
-            if (selectedChatRef.current && selectedChatRef.current._id === data.chat) {
-              setMessages(prev => [...prev, data.message]);
-            }
+  if (!mountedRef.current || !data.chat || !data.message?._id) return;
+
+  if (selectedChatRef.current && selectedChatRef.current._id === data.chat) {
+    setMessages(prev => {
+      const alreadyExists = prev.some(msg => msg._id === data.message._id);
+      if (alreadyExists) return prev; // ✅ Prevent duplicate
+      return [...prev, data.message]; // ✅ Add only if new
+    });
+  }
             
             // Update unread count for the chat that received the message
             setChats(prevChats => {
