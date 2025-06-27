@@ -7,11 +7,14 @@ export const initializeSocket = (token) => {
     socket.disconnect();
   }
 
-  socket = io('http://localhost:9000', {
-    auth: {
-      token: token
-    }
-  });
+  socket = io('https://project-r84n.onrender.com', {
+  auth: {
+    token: token
+  },
+  withCredentials: true,
+  transports: ['websocket'], // Optional: to force WebSocket connection
+});
+
 
   socket.on('connect', () => {
     console.log('Socket connected');
