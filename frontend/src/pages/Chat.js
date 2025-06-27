@@ -123,12 +123,15 @@ const Chat = () => {
 
           // Listen for message sent confirmation
           socket.on('message_sent', (message) => {
-            if (!mountedRef.current) return;
-            
-            // Update messages if this is the current chat
-            if (selectedChatRef.current && selectedChatRef.current._id === message.chatId) {
-              setMessages(prev => [...prev, message]);
-            }
+  if (!mountedRef.current || !message?._id) return;
+
+  if (selectedChatRef.current && selectedChatRef.current._id === message.chatId) {
+    setMessages(prev => {
+      const alreadyExists = prev.some(m => m._id === message._id);
+      if (alreadyExists) return prev; // ✅ Avoid adding again
+      return [...prev, message];
+    });
+  }
           });
 
           // Listen for messages read confirmation
