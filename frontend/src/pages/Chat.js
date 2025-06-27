@@ -43,6 +43,7 @@ const Chat = () => {
   const messagesEndRef = useRef(null);
   const mountedRef = useRef(true);
   const socketRef = useRef(null);
+  const selectedChatRef = useRef(null);
 
   // Cleanup function to prevent state updates after unmount
   useEffect(() => {
@@ -61,14 +62,31 @@ const Chat = () => {
 
     const connectSocket = async () => {
       try {
-        const { getSocket } = await import('../services/socket.js');
-        const socket = getSocket();
+        const { getSocket, initializeSocket } = await import('../services/socket.js');
+        let socket = getSocket();
+        
+        // Initialize socket if not already connected
+        if (!socket || !socket.connected) {
+          const token = localStorage.getItem('accessToken');
+          socket = initializeSocket(token, user._id);
+        }
+        
         if (socket && mountedRef.current) {
           socketRef.current = socket;
+          
+          // Register user if not already registered
+          if (user._id && socket.connected) {
+            socket.emit('register', user._id);
+          }
           
           // Listen for new messages
           socket.on('new_message', (data) => {
             if (!mountedRef.current || !data.chat) return;
+            
+            // Update messages if this is the current chat
+            if (selectedChatRef.current && selectedChatRef.current._id === data.chat) {
+              setMessages(prev => [...prev, data.message]);
+            }
             
             // Update unread count for the chat that received the message
             setChats(prevChats => {
@@ -78,7 +96,7 @@ const Chat = () => {
                 if (chat._id === data.chat) {
                   // Increment unread count for current user if they're not the sender
                   const updatedChat = { ...chat };
-                  if (updatedChat.unreadCount && user._id && data.sender !== user._id) {
+                  if (updatedChat.unreadCount && user._id && data.message?.sender?._id !== user._id) {
                     const currentUnread = updatedChat.unreadCount.get ? 
                       updatedChat.unreadCount.get(user._id) || 0 : 
                       updatedChat.unreadCount[user._id] || 0;
@@ -87,6 +105,43 @@ const Chat = () => {
                       updatedChat.unreadCount.set(user._id, currentUnread + 1);
                     } else {
                       updatedChat.unreadCount[user._id] = currentUnread + 1;
+                    }
+                  }
+                  // Update last message
+                  if (data.message?.content) {
+                    updatedChat.lastMessage = data.message.content;
+                  }
+                  return updatedChat;
+                }
+                return chat;
+              });
+            });
+          });
+
+          // Listen for message sent confirmation
+          socket.on('message_sent', (message) => {
+            if (!mountedRef.current) return;
+            
+            // Update messages if this is the current chat
+            if (selectedChatRef.current && selectedChatRef.current._id === message.chatId) {
+              setMessages(prev => [...prev, message]);
+            }
+          });
+
+          // Listen for messages read confirmation
+          socket.on('messages_read', (data) => {
+            if (!mountedRef.current) return;
+            
+            // Update unread count for the chat
+            setChats(prevChats => {
+              return prevChats.map(chat => {
+                if (chat._id === data.chatId) {
+                  const updatedChat = { ...chat };
+                  if (updatedChat.unreadCount && data.userId) {
+                    if (typeof updatedChat.unreadCount.set === 'function') {
+                      updatedChat.unreadCount.set(data.userId, 0);
+                    } else {
+                      updatedChat.unreadCount[data.userId] = 0;
                     }
                   }
                   return updatedChat;
@@ -115,6 +170,11 @@ const Chat = () => {
       scrollToBottom();
     }
   }, [messages, scrollToBottom]);
+
+  // Update selectedChatRef when selectedChat changes
+  useEffect(() => {
+    selectedChatRef.current = selectedChat;
+  }, [selectedChat]);
 
   const fetchChats = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -195,6 +255,13 @@ const Chat = () => {
         try {
           if (selectedChat._id) {
             await chatAPI.markAsRead(selectedChat._id);
+            
+            // Emit socket event to mark messages as read
+            if (socketRef.current && socketRef.current.connected) {
+              socketRef.current.emit('mark_messages_read', {
+                chatId: selectedChat._id
+              });
+            }
           }
         } catch (error) {
           console.error('Error marking messages as read:', error);
@@ -271,8 +338,11 @@ const Chat = () => {
     };
 
     try {
+      // Send message via API
       const response = await chatAPI.sendMessage(messageData);
+      
       if (mountedRef.current) {
+        // Add message to local state immediately
         setMessages(prev => [...prev, response.data.data]);
         setNewMessage('');
         
@@ -282,6 +352,18 @@ const Chat = () => {
             ? { ...chat, lastMessage: response.data.data.content }
             : chat
         ));
+
+        // Emit socket event for real-time delivery
+        if (socketRef.current && socketRef.current.connected) {
+          const otherParticipant = getOtherParticipant(selectedChat);
+          if (otherParticipant) {
+            socketRef.current.emit('send_message', {
+              chatId: selectedChat._id,
+              content: messageData.content,
+              receiverId: otherParticipant._id
+            });
+          }
+        }
       }
     } catch (error) {
       if (mountedRef.current) {
