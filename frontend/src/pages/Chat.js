@@ -39,6 +39,7 @@ const Chat = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
   const messagesEndRef = useRef(null);
   const mountedRef = useRef(true);
   const socketRef = useRef(null);
@@ -205,17 +206,61 @@ const Chat = () => {
   }, [selectedChat, fetchMessages]);
 
   useEffect(() => {
-    if (userId && chats.length > 0 && mountedRef.current) {
-      // If userId is provided in URL, find and select that chat
-      const chat = chats.find(c => c.participants?.some(p => p._id === userId));
-      if (chat) {
-        setSelectedChat(chat);
-        if (isMobile) {
-          setMobileOpen(false);
+    if (userId && mountedRef.current && !isCreatingChat) {
+      // If userId is provided in URL, try to find existing chat first
+      if (chats.length > 0) {
+        const existingChat = chats.find(c => c.participants?.some(p => p._id === userId));
+        if (existingChat) {
+          setSelectedChat(existingChat);
+          if (isMobile) {
+            setMobileOpen(false);
+          }
+          return; // Exit early if chat found
         }
       }
+      
+      // If no existing chat found, create a new one
+      const createNewChat = async () => {
+        if (isCreatingChat) return; // Prevent multiple calls
+        
+        try {
+          setIsCreatingChat(true);
+          setLoading(true);
+          const response = await chatAPI.getOrCreateChat(userId);
+          if (mountedRef.current) {
+            const newChat = response.data.data;
+            
+            // Check if this chat already exists in our list
+            const existingChat = chats.find(c => c._id === newChat._id);
+            if (existingChat) {
+              // If chat already exists, just select it
+              setSelectedChat(existingChat);
+            } else {
+              // If it's truly a new chat, add it to the list
+              setChats(prev => [newChat, ...prev]);
+              setSelectedChat(newChat);
+            }
+            
+            if (isMobile) {
+              setMobileOpen(false);
+            }
+          }
+        } catch (error) {
+          if (mountedRef.current) {
+            console.error('Error creating new chat:', error);
+            setError('Failed to create new conversation');
+          }
+        } finally {
+          if (mountedRef.current) {
+            setLoading(false);
+            setIsCreatingChat(false);
+          }
+        }
+      };
+      
+      createNewChat();
     }
-  }, [userId, chats, isMobile]);
+  }, [userId, isMobile, isCreatingChat]); // Added isCreatingChat to dependencies
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedChat || !mountedRef.current) return;
@@ -280,114 +325,142 @@ const Chat = () => {
       );
     }
 
-    if (chats.length === 0) {
-      return (
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          flex: 1,
-          p: 3
-        }}>
-          <Typography 
-            variant="body1" 
-            color="text.secondary"
-            sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }}
-          >
-            No conversations yet
+    return (
+      <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {/* Chat List Header */}
+        <Box
+          sx={{
+            p: 2,
+            borderBottom: 1,
+            borderColor: 'divider',
+            bgcolor: 'background.paper',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center'
+          }}
+        >
+          <Typography variant="h6" sx={{ fontSize: { xs: '1rem', sm: '1.25rem' } }}>
+            Conversations
           </Typography>
         </Box>
-      );
-    }
 
-    return (
-      <List sx={{ flex: 1, overflow: 'auto' }}>
-        {chats.map((chat) => {
-          // Add null checks for chat
-          if (!chat || !chat._id) {
-            return null;
-          }
-          
-          const otherUser = getOtherParticipant(chat);
-          const lastMessage = chat.lastMessage;
-          // Extract unread count for this user
-          let unread = 0;
-          if (chat.unreadCount && user?._id) {
-            if (typeof chat.unreadCount.get === 'function') {
-              unread = chat.unreadCount.get(user._id) || 0;
-            } else if (typeof chat.unreadCount === 'object') {
-              unread = chat.unreadCount[user._id] || 0;
-            }
-          }
-          const isUnread = unread > 0;
-
-          return (
-            <ListItem
-              key={chat._id}
-              button
-              onClick={() => {
-                if (mountedRef.current) {
-                  setSelectedChat(chat);
-                  if (isMobile) {
-                    setMobileOpen(false);
-                  }
-                }
-              }}
-              selected={selectedChat?._id === chat._id}
-              sx={{
-                borderBottom: 1,
-                borderColor: 'divider',
-                backgroundColor: isUnread ? 'action.hover' : 'transparent',
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                },
-                '&.Mui-selected': {
-                  backgroundColor: 'primary.light',
-                  '&:hover': {
-                    backgroundColor: 'primary.light',
-                  },
-                },
-              }}
+        {/* Chat List */}
+        {chats.length === 0 ? (
+          <Box sx={{ 
+            display: 'flex', 
+            justifyContent: 'center', 
+            alignItems: 'center', 
+            flex: 1,
+            p: 3
+          }}>
+            <Typography 
+              variant="body1" 
+              color="text.secondary"
+              sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }}
             >
-              <ListItemAvatar>
-                <Badge
-                  badgeContent={unread}
-                  color="error"
-                  invisible={unread === 0}
+              No conversations yet
+            </Typography>
+          </Box>
+        ) : (
+          <List sx={{ flex: 1, overflow: 'auto' }}>
+            {chats
+              .filter((chat, index, self) => 
+                // Remove duplicates based on chat ID
+                chat && chat._id && index === self.findIndex(c => c._id === chat._id)
+              )
+              .map((chat) => {
+              // Add null checks for chat
+              if (!chat || !chat._id) {
+                return null;
+              }
+              
+              const otherUser = getOtherParticipant(chat);
+              const lastMessage = chat.lastMessage;
+              // Extract unread count for this user
+              let unread = 0;
+              if (chat.unreadCount && user?._id) {
+                if (typeof chat.unreadCount.get === 'function') {
+                  unread = chat.unreadCount.get(user._id) || 0;
+                } else if (typeof chat.unreadCount === 'object') {
+                  unread = chat.unreadCount[user._id] || 0;
+                }
+              }
+              const isUnread = unread > 0;
+
+              return (
+                <ListItem
+                  key={chat._id}
+                  button
+                  onClick={() => {
+                    if (mountedRef.current) {
+                      setSelectedChat(chat);
+                      // Update URL to reflect the selected chat
+                      const otherUser = chat.participants?.find(p => p._id !== user?._id);
+                      if (otherUser) {
+                        window.history.replaceState(null, '', `/chat/${otherUser._id}`);
+                      }
+                      if (isMobile) {
+                        setMobileOpen(false);
+                      }
+                    }
+                  }}
+                  selected={selectedChat?._id === chat._id}
+                  sx={{
+                    borderBottom: 1,
+                    borderColor: 'divider',
+                    backgroundColor: isUnread ? 'action.hover' : 'transparent',
+                    '&:hover': {
+                      backgroundColor: 'action.hover',
+                    },
+                    '&.Mui-selected': {
+                      backgroundColor: 'primary.light',
+                      '&:hover': {
+                        backgroundColor: 'primary.light',
+                      },
+                    },
+                  }}
                 >
-                  <Avatar>
-                    {otherUser?.fullName?.charAt(0) || 'U'}
-                  </Avatar>
-                </Badge>
-              </ListItemAvatar>
-              <ListItemText
-                primary={
-                  <Typography
-                    variant="subtitle1"
-                    sx={{
-                      fontWeight: isUnread ? 'bold' : 'normal',
-                      color: isUnread ? 'text.primary' : 'text.secondary',
-                    }}
-                  >
-                    {otherUser?.fullName || 'Unknown User'}
-                  </Typography>
-                }
-                secondary={
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      fontWeight: isUnread ? 'bold' : 'normal',
-                      color: isUnread ? 'text.primary' : 'text.secondary',
-                    }}
-                  >
-                    {lastMessage || 'No messages yet'}
-                  </Typography>
-                }
-              />
-            </ListItem>
-          );
-        })}
-      </List>
+                  <ListItemAvatar>
+                    <Badge
+                      badgeContent={unread}
+                      color="error"
+                      invisible={unread === 0}
+                    >
+                      <Avatar>
+                        {otherUser?.fullName?.charAt(0) || 'U'}
+                      </Avatar>
+                    </Badge>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={
+                      <Typography
+                        variant="subtitle1"
+                        sx={{
+                          fontWeight: isUnread ? 'bold' : 'normal',
+                          color: isUnread ? 'text.primary' : 'text.secondary',
+                        }}
+                      >
+                        {otherUser?.fullName || 'Unknown User'}
+                      </Typography>
+                    }
+                    secondary={
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontWeight: isUnread ? 'bold' : 'normal',
+                          color: isUnread ? 'text.primary' : 'text.secondary',
+                        }}
+                      >
+                        {lastMessage || 'No messages yet'}
+                      </Typography>
+                    }
+                  />
+                </ListItem>
+              );
+            })}
+          </List>
+        )}
+      </Box>
     );
   }, [chats, loading, selectedChat, getOtherParticipant, user, isMobile]);
 
