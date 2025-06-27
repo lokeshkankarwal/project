@@ -121,25 +121,30 @@ const registerUser = asyncHandler(async(req, res) => {
 })
 
 const generateAccessAndRefreshToken = async(userId) => {
-    try {
-        const user = await User.findById(userId)
-        
-        const accessToken = user.generateAccessToken()
-        const refreshToken = user.generateRefreshToken()
-    
-        user.refreshToken = refreshToken
-        await user.save({ validateBeforeSave: false })
-    
-        return { accessToken, refreshToken }
-    } catch (error) {
-        throw new ApiError(500, "Something went wrong while generating access and refresh tokens")        
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new ApiError(404, "User not found");
     }
+
+    const accessToken = user.generateAccessToken();
+    const refreshToken = user.generateRefreshToken();
+
+    user.refreshToken = refreshToken;
+    await user.save({ validateBeforeSave: false });
+
+    return { accessToken, refreshToken };
+  } catch (error) {
+    console.error("🔴 Token generation failed:", error);
+    throw new ApiError(500, "Something went wrong while generating access and refresh tokens");
+  }
 }
+
 
 const secureCookieWithExpiry = {
     httpOnly: true,
     secure: true,
-    sameSite: 'strict',
+    sameSite: 'None',
     expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30) // 30 days
 }
 
@@ -200,7 +205,7 @@ const logoutUser = asyncHandler(async(req, res) => {
     const secureCookie = {
         httpOnly: true,
         secure: true,
-        sameSite: 'strict',
+        sameSite: 'None',
     }
 
     return res
