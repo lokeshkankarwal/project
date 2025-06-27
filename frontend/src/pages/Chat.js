@@ -330,47 +330,45 @@ const Chat = () => {
   }, [userId, isMobile, isCreatingChat]); // Added isCreatingChat to dependencies
 
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || !selectedChat || !mountedRef.current) return;
+  if (!newMessage.trim() || !selectedChat || !mountedRef.current) return;
 
-    const messageData = {
-      chatId: selectedChat._id,
-      content: newMessage.trim(),
-    };
+  const messageData = {
+    chatId: selectedChat._id,
+    content: newMessage.trim(),
+  };
 
-    try {
-      // Send message via API
-      const response = await chatAPI.sendMessage(messageData);
-      
-      if (mountedRef.current) {
-        // Add message to local state immediately
-        setMessages(prev => [...prev, response.data.data]);
-        setNewMessage('');
-        
-        // Update the chat's last message
-        setChats(prev => prev.map(chat => 
-          chat._id === selectedChat._id 
-            ? { ...chat, lastMessage: response.data.data.content }
-            : chat
-        ));
+  try {
+    // Send message via API
+    await chatAPI.sendMessage(messageData);
 
-        // Emit socket event for real-time delivery
-        if (socketRef.current && socketRef.current.connected) {
-          const otherParticipant = getOtherParticipant(selectedChat);
-          if (otherParticipant) {
-            socketRef.current.emit('send_message', {
-              chatId: selectedChat._id,
-              content: messageData.content,
-              receiverId: otherParticipant._id
-            });
-          }
+    if (mountedRef.current) {
+      setNewMessage(''); // Just clear input, don't add to state
+
+      // Update chat's last message
+      setChats(prev => prev.map(chat =>
+        chat._id === selectedChat._id
+          ? { ...chat, lastMessage: messageData.content }
+          : chat
+      ));
+
+      // Emit via socket
+      if (socketRef.current && socketRef.current.connected) {
+        const otherParticipant = getOtherParticipant(selectedChat);
+        if (otherParticipant) {
+          socketRef.current.emit('send_message', {
+            chatId: selectedChat._id,
+            content: messageData.content,
+            receiverId: otherParticipant._id
+          });
         }
       }
-    } catch (error) {
-      if (mountedRef.current) {
-        setError('Failed to send message');
-      }
     }
-  };
+  } catch (error) {
+    if (mountedRef.current) {
+      setError('Failed to send message');
+    }
+  }
+};
 
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
