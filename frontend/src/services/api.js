@@ -76,6 +76,7 @@ export const chatAPI = {
   sendMessage: (messageData) => api.post('/chats/message', messageData),
   createChat: (participantId) => api.post('/chats', { participantId }),
   markAsRead: (chatId) => api.post(`/chats/${chatId}/mark-read`),
+  getOrCreateChat: (userId) => api.get(`/chats/user/${userId}`),
 };
 
 export default api;
