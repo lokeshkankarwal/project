@@ -358,23 +358,7 @@ const Chat = () => {
       ));
 
       // Emit via socket
-      if (socketRef.current && socketRef.current.connected) {
-        const otherParticipant = getOtherParticipant(selectedChat);
-        if (otherParticipant) {
-          socketRef.current.emit('send_message', {
-            chatId: selectedChat._id,
-            content: messageData.content,
-            receiverId: otherParticipant._id
-          });
-        }
-      }
-    }
-  } catch (error) {
-    if (mountedRef.current) {
-      setError('Failed to send message');
-    }
-  }
-};
+      
 
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
